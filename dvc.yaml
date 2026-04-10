@@ -1,0 +1,7 @@
+stages:
+  extract:
+    cmd:
+      - mkdir -p data 
+      - python -m extract
+    outs:
+      - data/sp500_targets.csv
