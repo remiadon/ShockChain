@@ -13,11 +13,16 @@ def sp500_targets():
     targets = sp500_cuts.to_dummies('price')
     return targets
 
+def news_headlines():
+    return pl.read_ndjson('hf://datasets/olm/gdelt-news-headlines/**/*.jsonl')\
+        .select(pl.col.article_date.str.to_date('%Y%m%d').alias('date'), 'title')
+
+
 
 if __name__ == "__main__":
     args = parser.parse_args()
     current_functions = dict(getmembers(__import__(__name__), isfunction))
     if args.output in current_functions:
-        current_functions[args.output]().write_csv(f"data/{args.output}.csv")
+        current_functions[args.output]().write_parquet(f"data/{args.output}.parquet")
     else:
         raise ValueError(f"Function {args.output} not found in the current module.")
