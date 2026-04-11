@@ -1,8 +1,9 @@
 stages:
   create_data_dir:
     cmd: mkdir -p data
+
   extract:
-    foreach: 
+    foreach:
       - sp500_targets
       - news_headlines
     do:
@@ -10,3 +11,36 @@ stages:
         - python -m src.extract --output ${item}
       outs:
         - data/${item}.parquet
+
+  train:
+    cmd: >-
+      python -m src.finetune_headline_encoder
+        --headlines data/news_headlines.parquet
+        --targets   data/sp500_targets.parquet
+        --output    models
+    deps:
+      - data/news_headlines.parquet
+      - data/sp500_targets.parquet
+      - src/finetune_headline_encoder.py
+    params:
+      - params.yaml:
+          - train
+    outs:
+      - models/headline_classifier.pt
+
+  populate_lancedb:
+    cmd: >-
+      python -m src.populate_lancedb
+        --headlines  data/news_headlines.parquet
+        --checkpoint models/headline_classifier.pt
+        --output     data/lancedb
+    deps:
+      - models/headline_classifier.pt
+      - data/news_headlines.parquet
+      - src/populate_lancedb.py
+    params:
+      - params.yaml:
+          - train.base_model
+          - train.max_length
+    outs:
+      - data/lancedb

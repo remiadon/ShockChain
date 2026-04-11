@@ -11,4 +11,6 @@ dependencies = [
     'lancedb',  # for Hybrid Search
     'yfinance-pl==0.7.2.2',
     'dvc',
+    'transformers',          # AutoTokenizer / AutoModel (HuggingFace)
+    'tqdm',                  # progress bars in training loop
 ]

@@ -9,8 +9,10 @@ parser.add_argument("--output", type=str, default="sp500_targets", help="Output 
 def sp500_targets():
     sp500 = yf.Ticker("^GSPC")
     sp500 = sp500.history(period='10y', interval='1d').select(pl.col.date.dt.date(), 'volume', price='close.amount')
-    sp500_cuts = sp500.with_columns(pl.col.price.pct_change().cut([0.01, 0.03, 0.05, 0.1, 1]))
-    targets = sp500_cuts.to_dummies('price')
+    sp500_cuts = sp500.with_columns(
+        pl.col.price.pct_change().cut([-1, -0.1, -0.05, -0.03, -0.01, 0.01, 0.03, 0.05, 0.1, 1])
+    )
+    targets = sp500_cuts.to_dummies('price') # TODO remove dummy encoding, pytorch can handle categorical labels directly with CrossEntropyLoss and no need for one-hot encoding. Just use the cut labels as categorical targets.
     return targets
 
 def news_headlines():

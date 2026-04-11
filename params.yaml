@@ -1,0 +1,18 @@
+train:
+  # Pre-trained encoder backbone (any HuggingFace sentence-transformer works)
+  base_model: "sentence-transformers/paraphrase-MiniLM-L3-v2"
+
+  # Set to 1 to predict the NEXT trading day's move (more realistic for trading)
+  target_lag_days: 1
+
+  epochs: 1
+  # Physical batch size per device step. Keep small on MPS to stay within VRAM.
+  # Effective batch = batch_size × grad_accum.
+  batch_size: 512
+  grad_accum: 4   # accumulate gradients over N micro-batches before stepping
+  lr: 2e-5
+  max_length: 32
+  val_ratio: 0.2
+
+  # Set to an integer (e.g. 50000) for a quick smoke-test run; null = use all data
+  max_samples: null
