@@ -20,6 +20,7 @@ Design notes
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 import dvc.api
@@ -157,8 +158,8 @@ def build_pairs(
         .drop_nulls("title")
     )
 
-    if cfg["max_samples"] is not None:
-        df = df.head(int(cfg["max_samples"]))
+    if cfg["max_samples"] is not None: # TODO : temporal continuity is not enough -> test on cases with high cosine-distance ?
+        df = df.sample(int(cfg["max_samples"])).sort('date')
 
     # one-hot → class index (kept inside Polars to avoid huge Python objects)
     pairs = (
@@ -295,6 +296,14 @@ def train(
 if __name__ == "__main__":
     args = parser.parse_args()
     cfg  = dvc.api.params_show()["train"]
+
+    # ---- resource limits (reduce heat on laptops) ----
+    # Lower scheduling priority: macOS will yield CPU time under thermal pressure.
+    os.nice(cfg.get("nice", 0))
+    # Cap CPU thread pools used by PyTorch (affects CPU-side ops and DataLoader).
+    if "num_threads" in cfg:
+        torch.set_num_threads(cfg["num_threads"])
+        torch.set_num_interop_threads(max(1, cfg["num_threads"] // 2))
 
     headlines = pl.read_parquet(args.headlines)
     targets   = pl.read_parquet(args.targets)

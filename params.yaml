@@ -5,7 +5,7 @@ train:
   # Set to 1 to predict the NEXT trading day's move (more realistic for trading)
   target_lag_days: 1
 
-  epochs: 1
+  epochs: 3
   # Physical batch size per device step. Keep small on MPS to stay within VRAM.
   # Effective batch = batch_size × grad_accum.
   batch_size: 512
@@ -15,4 +15,10 @@ train:
   val_ratio: 0.2
 
   # Set to an integer (e.g. 50000) for a quick smoke-test run; null = use all data
-  max_samples: null
+  max_samples: 200_000
+
+  # ---- thermal / resource limits ----
+  # UNIX nice value (0–19): higher = lower scheduling priority, cooler machine.
+  nice: 10
+  # Max CPU threads for PyTorch ops. M4 has 10 cores; 4 keeps things cool.
+  num_threads: 4
