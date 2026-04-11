@@ -1,7 +1,15 @@
 stages:
+  create_data_dir:
+    cmd: mkdir -p data
   extract:
+    foreach: 
+      - sp500_targets
+    do:
+      cmd:
+        - mkdir -p data 
+        - python -m src.extract --output ${item}
+      outs:
+        - data/${item}.csv
+  extract_news:
     cmd:
-      - mkdir -p data 
-      - python -m extract
-    outs:
-      - data/sp500_targets.csv
+      - python -c "import polars as pl; pl.read_ndjson('hf://datasets/olm/gdelt-news-headlines/**/*.jsonl').select(pl.col.article_date.str.to_date('%Y%m%d').alias('date'), 'title').write_parquet('data/news_headlines.parquet')"
