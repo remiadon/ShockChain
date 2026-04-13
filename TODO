@@ -1,0 +1,4 @@
+- filter out similar semantics over a 30-days window from the train set (extract.py tries doing that with an exact match on 'headline')
+- define a .csv test set with 2 columns : a date and an existing scenario : these should be remove from the train set of course, and the accuracy of our transformer should be tested on it
+- try fine-tuning models already rooted in finance; this may give an edge
+- finish installing lancedb on scaleway
