@@ -1,13 +1,11 @@
 stages:
-  create_data_dir:
-    cmd: mkdir -p data
-
   extract:
     foreach:
       - sp500_targets
       - news_headlines
     do:
       cmd:
+        - mkdir -p data
         - python -m src.extract --output ${item}
       outs:
         - data/${item}.parquet
