@@ -22,3 +22,12 @@ train:
   nice: 10
   # Max CPU threads for PyTorch ops. M4 has 10 cores; 4 keeps things cool.
   num_threads: 4
+
+populate_lancedb:
+  table_name: "headlines"
+  #db_uri: "s3://shockchain/"
+  #endpoint_url: "https://s3.fr-par.scw.cloud"
+  # Inference has no gradients/optimiser state, so this can be much larger than
+  # the training batch_size. 1024 is a safe starting point on MPS;
+  # push to 2048 if VRAM allows.
+  encode_batch_size: 1024

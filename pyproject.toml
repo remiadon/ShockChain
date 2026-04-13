@@ -14,3 +14,12 @@ dependencies = [
     'transformers',          # AutoTokenizer / AutoModel (HuggingFace)
     'tqdm',                  # progress bars in training loop
 ]
+
+
+[dependency-groups]
+dev = [
+  "pre-commit"
+]
+lint = [
+  "ruff"
+]

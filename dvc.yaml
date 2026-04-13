@@ -25,14 +25,14 @@ stages:
       - models/headline_classifier.pt
 
   populate_lancedb:
-    cmd: python -m src.populate_lancedb --headlines  data/news_headlines.parquet --checkpoint models/headline_classifier.pt --output data/lancedb
+    cmd:
+      - mkdir -p lance
+      - python -m src.populate_lancedb --headlines data/news_headlines.parquet --checkpoint models/headline_classifier.pt --output lance
     deps:
       - models/headline_classifier.pt
       - data/news_headlines.parquet
-      - src/populate_lancedb.py
     params:
       - params.yaml:
-          - train.base_model
-          - train.max_length
+          - populate_lancedb
     outs:
-      - data/lancedb
+      - lance/

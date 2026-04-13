@@ -313,13 +313,8 @@ if __name__ == "__main__":
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     ckpt = output / "headline_classifier.pt"
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "base_model":       cfg["base_model"],
-            "class_names":      model.class_names,
-            "hidden_size":      model.encoder.config.hidden_size,
-        },
-        ckpt,
-    )
+    # Save the full model object so torch.load() restores it directly without
+    # calling __init__ — meaning AutoModel.from_pretrained() is never triggered
+    # again when the checkpoint is consumed by populate_lancedb.py.
+    torch.save(model, ckpt)
     print(f"Saved → {ckpt}")

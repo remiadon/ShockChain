@@ -1,0 +1,7 @@
+repos:
+- repo: local
+  hooks:
+    - id: dag_to_readme
+      name: dag-to-readme
+      language: system
+      entry: bash -c 'dvc dag --md > README.md'
