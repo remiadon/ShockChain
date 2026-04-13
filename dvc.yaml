@@ -29,7 +29,7 @@ stages:
       - data/news_headlines.parquet
       - src/populate_lancedb.py
     outs:
-      - lance/headlines.lancedb
+      - lance/headlines.lance
     params:
       - params.yaml:
           - populate_lancedb
@@ -39,6 +39,6 @@ stages:
   find_closests_scenarios:
     cmd: python -m src.duckdb_vector_search "SELECT * FROM lance_vector_search('lance/headlines.lance', 'vector', embed('my scenario'), k=5)"
     deps:
-      - lance/headlines.lancedb
+      - lance/headlines.lance
       - models/headline_classifier.pt
       - src/duckdb_vector_search.py
