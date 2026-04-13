@@ -17,8 +17,7 @@ def sp500_targets():
 
 def news_headlines():
     df = pl.read_ndjson('hf://datasets/olm/gdelt-news-headlines/**/*.jsonl')
-    filt = pl.len().over('domain').gt(1000) & pl.col.article_date.eq(pl.col.article_date.min().over('title'))
-    df = df.filter(filt).select(pl.col.article_date.str.to_date('%Y%m%d').alias('date'), 'title')
+    df = df.group_by('title').agg(date=pl.col.article_date.str.to_date('%Y%m%d').min())
     return df
 
 

@@ -1,0 +1,5 @@
+[core]
+    remote = bucket
+['remote "bucket"']
+    url = s3://shockchain/
+    profile = shockchain

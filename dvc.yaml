@@ -23,14 +23,22 @@ stages:
       - models/headline_classifier.pt
 
   populate_lancedb:
-    cmd:
-      - mkdir -p lance
-      - python -m src.populate_lancedb --headlines data/news_headlines.parquet --checkpoint models/headline_classifier.pt --output lance
+    cmd: python -m src.populate_lancedb --headlines data/news_headlines.parquet --checkpoint models/headline_classifier.pt
     deps:
       - models/headline_classifier.pt
       - data/news_headlines.parquet
+      - src/populate_lancedb.py
+    outs:
+      - lance/headlines.lancedb
     params:
       - params.yaml:
           - populate_lancedb
-    outs:
-      - lance/
+    # Output lives in S3 (db_uri from params.yaml) — not tracked by DVC cache.
+
+
+  find_closests_scenarios:
+    cmd: python -m src.duckdb_vector_search "SELECT * FROM lance_vector_search('lance/headlines.lance', 'vector', embed('my scenario'), k=5)"
+    deps:
+      - lance/headlines.lancedb
+      - models/headline_classifier.pt
+      - src/duckdb_vector_search.py

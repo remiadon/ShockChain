@@ -9,6 +9,8 @@ dependencies = [
     'torch==2.11.0',
     'polars>=1.39.3',
     'lancedb',  # for Hybrid Search
+    'duckdb>=1.2.0',  # SQL interface over Lance datasets
+    'boto3',          # AWS profile resolution for S3 storage options
     'yfinance-pl==0.7.2.2',
     'dvc',
     'transformers',          # AutoTokenizer / AutoModel (HuggingFace)
@@ -18,7 +20,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-  "pre-commit"
+  "pre-commit",
+  "ipython",
 ]
 lint = [
   "ruff"
