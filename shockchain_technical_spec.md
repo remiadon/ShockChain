@@ -500,33 +500,134 @@ The following latency targets are rough estimates based on typical inference tim
 
 ---
 
+
 ## 11. Development roadmap (proposed)
-
-The following roadmap is a proposed sequencing of work. Timelines and scope are subject to revision based on data availability and initial experimental results.
-
-### v0 (MVP)
-
-- Benzinga data acquisition, filtering, and label construction
-- FinBERT embedding pipeline (frozen)
-- LLM structured feature extraction (if included)
-- 3-stage multitask MLP with noise injection
-- Evaluation against 4 baselines
-- Minimal web UI with chain visualization and override
-
-### v1 (post-validation)
-
-- Fine-tune FinBERT on the event-impact prediction task
-- Expand indicator set (e.g., IG/HY spreads, EM FX, sector ETFs)
-- Continuous probability output (replace discretized classes with calibrated distributional forecasts)
-- Scenario saving, comparison, and export (PDF report for CRO presentation)
-- Historical event search: "show me events similar to this headline and what happened"
-
-### v2 (scale)
-
-- Multi-event chaining: enter a sequence of events and simulate cumulative impact
-- Real-time news feed integration with auto-scoring
-- Portfolio-level overlay: connect to user's positions and show P&L impact per scenario
-- Model retraining pipeline with new data ingestion
+ 
+The following roadmap is calibrated for a side project at approximately 8 to 15 hours per week, with the understanding that some weeks will see zero progress due to other commitments. Durations are expressed as calendar weeks to account for this irregular cadence. The total estimated timeline for the MVP is 5 to 7 months.
+ 
+The roadmap is deliberately structured to produce a visible, testable output at the end of each phase. This is important for side projects: long stretches of invisible infrastructure work kill motivation. Every phase ends with something you can look at, show someone, or evaluate.
+ 
+### Phase 0: Project setup and data acquisition (weeks 1 to 3, approximately 3 weeks)
+ 
+**Goal**: Have raw data in hand and a working development environment. This phase is deliberately short and concrete to build early momentum.
+ 
+| Task | Estimated effort | Details |
+|------|------------------|---------|
+| Set up project repository and environment | 3 to 4 hours | Python environment, dependencies (PyTorch, Transformers, pandas), project structure, version control |
+| Acquire Benzinga data from Massive | 4 to 6 hours | Account setup, data download, initial exploration of schema, volume, and time coverage. Understand what fields are available (timestamp, headline text, tickers, categories) |
+| Exploratory data analysis | 4 to 6 hours | Headline volume over time, category distribution, timestamp granularity, headline length distribution. The goal is to understand what you are working with before building anything |
+| Acquire market data | 3 to 4 hours | Download historical daily data for the target indicators (SPX, VIX, DXY, WTI, US10Y) and market state features. Yahoo Finance or FRED. Store as clean CSVs or parquet |
+ 
+**Deliverable**: A notebook showing headline volume over time, sample headlines, and aligned market data for the target indicators. You should be able to see the raw materials of the project.
+ 
+**Go/no-go checkpoint**: Is the Benzinga data sufficient in volume and time coverage? If fewer than 3,000 headlines survive initial inspection of the date range, consider supplementary sources before proceeding.
+ 
+### Phase 1: Data pipeline and label construction (weeks 4 to 9, approximately 6 weeks)
+ 
+**Goal**: A clean, labeled dataset ready for model training. This is the longest and most unglamorous phase. It is also where most side projects stall, so break it into small, testable subtasks.
+ 
+| Task | Estimated effort | Details |
+|------|------------------|---------|
+| Rule-based headline pre-filter | 4 to 6 hours | Implement keyword and pattern filters to remove analyst opinions, price targets, earnings commentary. Manually review 200 random filtered/retained headlines to calibrate |
+| LLM headline classifier | 8 to 12 hours | Hand-label approximately 50 headlines as exogenous event vs. market commentary. Build few-shot prompt for Claude Haiku. Run on full corpus. Manually validate a random sample of 200 classified headlines. Iterate on prompt until precision is acceptable (target > 85% on the "exogenous event" class) |
+| Timestamp alignment logic | 4 to 6 hours | Implement the conservative alignment rule (all headlines on date t map to t+1 open). Handle weekends, holidays (US market calendar), and edge cases. This is fiddly but critical; get it right once |
+| Market state feature engineering | 6 to 8 hours | Compute all derived features (VIX percentile, yield curve slope, realized vol, cross-asset correlation, put/call ratio). Align to headline dates. Handle missing data and backfill rules |
+| Label construction and discretization | 4 to 6 hours | Compute forward returns at 1d, 5d, 15d for each indicator. Compute trailing 60-day realized vol. Discretize into 5 classes. Validate class distribution; expect 55 to 65% neutral, 15 to 20% moderate, 5 to 10% extreme |
+| Structured feature extraction (if included) | 6 to 8 hours | Build LLM extraction prompt for event category, asset class, geographic scope, escalation signal. Run on full corpus. Validate on a subset |
+| Final dataset assembly | 3 to 4 hours | Join all components into a single training-ready dataset. Train/val/test split by date. Save as parquet or HDF5. Write a data card documenting all decisions |
+ 
+**Deliverable**: A clean dataset file with columns for headline, embedding (or raw text to embed later), market state features, structured features (if applicable), and discretized labels for all indicators at all horizons. A data card documenting filtering decisions, alignment rules, and class distributions.
+ 
+**Go/no-go checkpoint**: How many usable training samples do you have (events before 2022)? If fewer than 2,000, the shallow MLP may not have enough signal. Consider simplifying to fewer indicators or coarser discretization (3 classes instead of 5).
+ 
+### Phase 2: Embedding pipeline and baseline models (weeks 10 to 13, approximately 4 weeks)
+ 
+**Goal**: Establish performance baselines and validate that the event embedding carries signal. This phase is where you find out whether the project is viable.
+ 
+| Task | Estimated effort | Details |
+|------|------------------|---------|
+| FinBERT embedding pipeline | 4 to 6 hours | Load FinBERT from HuggingFace. Batch-embed all headlines. Store embeddings alongside the dataset. This is a one-time compute step |
+| Always-neutral baseline | 1 to 2 hours | Compute accuracy and macro F1 for a model that always predicts class 0. This is your absolute floor |
+| Sentiment-only baseline | 4 to 6 hours | Extract FinBERT sentiment scores. Train a simple logistic regression or small MLP mapping sentiment to 3-class directional prediction. Evaluate |
+| Market-state-only baseline | 4 to 6 hours | Train a small MLP on X alone (no headline information). This tests whether the market regime already predicts what happens next, regardless of the event |
+| Embedding quality analysis | 3 to 4 hours | Visualize embedding space (t-SNE or UMAP) colored by event category and by market reaction. Check whether similar events cluster together. This tells you whether FinBERT representations are useful for your task before investing in the full model |
+ 
+**Deliverable**: A baseline comparison table showing accuracy, macro F1, and directional accuracy for all three baselines across all indicators and horizons. An embedding visualization showing whether event types cluster meaningfully.
+ 
+**Go/no-go checkpoint**: Does the sentiment-only baseline beat always-neutral by a meaningful margin (at least 3 to 5 points of macro F1)? If not, the headline signal may be too weak for any downstream model to exploit, and you should investigate whether the labeling or filtering pipeline has issues before proceeding.
+ 
+### Phase 3: Core model development (weeks 14 to 20, approximately 7 weeks)
+ 
+**Goal**: Train the full ShockChain model (3-stage chain with noise injection) and evaluate against baselines. This is the core ML work.
+ 
+| Task | Estimated effort | Details |
+|------|------------------|---------|
+| Stage 1 model (next-day) | 8 to 10 hours | Implement the multitask MLP with shared trunk and 5 heads. Train on 1-day prediction task only (no chain yet). This validates the architecture before adding chain complexity |
+| Noise injection module | 3 to 4 hours | Implement the label corruption logic as a reusable module. Unit test with known inputs to verify the perturbation distribution matches the specification |
+| Chain wiring (stages 2 and 3) | 6 to 8 hours | Extend the architecture to 3 stages with chain connections. Implement the one-hot encoding of intermediate predictions. Implement noise injection into the training loop |
+| Hyperparameter tuning | 8 to 12 hours | Tune learning rate, dropout, noise injection rate ($p_{\text{true}}$), class weights. Use validation set macro F1 as the selection criterion. This will take multiple training runs; expect 10 to 20 experiments |
+| Independent heads baseline | 4 to 6 hours | Train the same architecture but without chain connections (each horizon sees only Q, S, X). This directly tests whether the chain helps |
+| Full evaluation | 4 to 6 hours | Evaluate ShockChain and all baselines on the test set. Compute all metrics from section 8. Generate calibration curves. Write up results |
+ 
+**Deliverable**: A trained model with full evaluation results. A comparison table showing ShockChain vs. all four baselines. Calibration curves for each head. A clear answer to the question: does the chain add value?
+ 
+**Go/no-go checkpoint**: Does ShockChain beat all baselines on at least the 1d horizon? If the chain underperforms independent heads, the noise injection parameters need tuning, or the chain architecture may not be justified for this dataset size. If ShockChain does not beat market-state-only, the event embedding is not contributing, and you should revisit the embedding strategy before building a UI.
+ 
+### Phase 4: Minimal web UI (weeks 21 to 26, approximately 6 weeks)
+ 
+**Goal**: A functional web application that demonstrates the full ShockChain workflow, from headline input to chain visualization to user override.
+ 
+| Task | Estimated effort | Details |
+|------|------------------|---------|
+| Backend API (FastAPI) | 8 to 10 hours | Endpoints for headline submission (returns full chain prediction), override submission (returns re-inferred downstream stages), and current market state retrieval. Load the trained PyTorch model into the FastAPI process |
+| FinBERT serving | 3 to 4 hours | Integrate FinBERT inference into the backend. Handle tokenization and embedding extraction. Consider caching embeddings for repeated queries |
+| LLM extraction integration (if applicable) | 3 to 4 hours | Call Claude Haiku API for structured feature extraction at inference time. Handle API errors and latency gracefully |
+| Frontend: chain visualization | 10 to 14 hours | React app with three connected panels (1d, 5d, 15d). Each panel shows indicator tiles with color coding and confidence. Animated arrows between panels to convey the chain flow |
+| Frontend: override mechanism | 6 to 8 hours | Clickable indicator tiles that open a class selector. Override triggers re-inference of downstream stages. Visual distinction (amber border) for overridden tiles. This is the core UX differentiator; spend time making it feel responsive |
+| Frontend: input and polish | 4 to 6 hours | Headline text input, optional date picker, loading states, error handling. Basic responsive layout for desktop |
+| Integration testing | 4 to 6 hours | End-to-end testing of the full workflow. Verify that overrides propagate correctly. Test with a range of headline types |
+ 
+**Deliverable**: A working web application where you can type a headline, see chain predictions, override intermediate values, and observe downstream changes. This is the MVP.
+ 
+### Post-MVP: v1 improvements (no fixed timeline)
+ 
+The following improvements are sequenced by expected impact. Work on them as motivation and time allow, in roughly this order.
+ 
+| Improvement | Estimated effort | Priority rationale |
+|-------------|------------------|---------------------|
+| Scenario saving and comparison | 8 to 12 hours | Lets the user explore multiple "what if" paths side by side. High UX value, moderate engineering effort |
+| Confidence thresholding and "low confidence" warnings | 3 to 4 hours | Small change with significant trust impact. Flag predictions where the model is uncertain |
+| Historical event search ("show me similar past events") | 10 to 15 hours | Build a nearest-neighbor index on the FinBERT embedding space. When the user submits a headline, show the 5 most similar historical events and what actually happened. High value for user trust |
+| Fine-tune FinBERT on the prediction task | 8 to 12 hours | Unfreeze the encoder and fine-tune end-to-end. Only worth attempting once you have validated that the frozen embedding carries signal and you have enough data |
+| Expand indicator set | 6 to 10 hours per indicator | Add credit spreads, EM FX, sector ETFs. Each new indicator requires data sourcing, label construction, and a new head. Incremental effort |
+| Continuous distributional output | 10 to 15 hours | Replace 5-class discretization with calibrated probability distributions over returns. More informative but harder to calibrate and evaluate |
+| PDF/report export for CRO presentations | 6 to 10 hours | Generate a formatted scenario report that the risk manager can present. High value for adoption in a real workflow |
+ 
+### Timeline summary
+ 
+| Phase | Calendar weeks | Cumulative | Key output |
+|-------|----------------|------------|------------|
+| Phase 0: Setup and data acquisition | Weeks 1 to 3 | Month 1 | Raw data in hand, EDA notebook |
+| Phase 1: Data pipeline and labels | Weeks 4 to 9 | Month 2 to 3 | Clean labeled dataset |
+| Phase 2: Embeddings and baselines | Weeks 10 to 13 | Month 3 to 4 | Baseline performance table, go/no-go |
+| Phase 3: Core model | Weeks 14 to 20 | Month 4 to 5 | Trained model, full evaluation |
+| Phase 4: Web UI | Weeks 21 to 26 | Month 5 to 7 | Working MVP application |
+| Total v0 | 26 weeks | 6 to 7 months | Complete MVP |
+ 
+These estimates assume approximately 10 hours per week of effective work. Add 20 to 30% buffer for weeks with zero progress, debugging rabbit holes, and the inevitable data issues that only surface during model training. A realistic total is 7 to 8 months from start to a working MVP.
+ 
+### Side project risk factors
+ 
+There are several risks specific to the side-project format that are worth naming explicitly.
+ 
+**Motivation cliff after Phase 1**: The data pipeline phase is long and produces no exciting output. Break it into the smallest possible subtasks and track progress visibly (e.g., a checklist). Consider building a quick "smoke test" model (logistic regression on raw sentiment) at the end of Phase 1 just to see numbers, even if they are bad.
+ 
+**Scope creep in Phase 4**: The UI is where it becomes tempting to add "just one more feature." Define the MVP UI before starting Phase 4 and stick to it. The chain visualization with override is the only feature that matters for v0. Everything else is v1.
+ 
+**Data issues surfacing late**: You will discover labeling problems, timestamp edge cases, and missing data during model training (Phase 3), not during data pipeline construction (Phase 1). Budget time for going back to Phase 1 during Phase 3. This is normal and expected.
+ 
+**Hardware for training**: The shallow MLP will train in minutes on a laptop CPU. FinBERT embedding of the full corpus is the only compute-intensive step and should take under an hour on a GPU or a few hours on CPU. No cloud compute budget is required for v0.
+ 
 
 ---
 
