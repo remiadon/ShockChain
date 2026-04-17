@@ -17,10 +17,18 @@ def classif_targets(
         tick = yf.Ticker(ticker)
         hist = tick.history(period='10y', interval=interval).select(
             pl.col.date.dt.date(),
-            pl.col('close.amount').pct_change().cut(list(cut_points)).alias(ticker)
+            pl.col('close.amount').alias(ticker)
         )
         _l.append(hist)
-    targets = pl.concat(_l, how='align_full').drop_nulls()
+    df = pl.concat(_l, how='align_full').drop_nulls()
+    var = pl.col(tickers).pct_change()
+    zscore = (var - var.rolling_mean(60)) / var.rolling_std(60)
+    targets = df.select('date',
+        zscore.cut(
+            [-2, -1, 1, 2], 
+            labels=['strong negative', 'negative', 'neutral', 'positive', 'strong positive']
+        ).name.keep()
+    ).drop_nulls()
     with pl.Config(tbl_cols=10, tbl_formatting='MARKDOWN', tbl_rows=300):
         print(
             "Value counts for each target column:\n",
