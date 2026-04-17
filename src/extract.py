@@ -1,4 +1,5 @@
 import polars as pl
+import polars.selectors as cs
 import yfinance_pl as yf
 import argparse
 from inspect import getmembers, isfunction
@@ -6,13 +7,24 @@ from inspect import getmembers, isfunction
 parser = argparse.ArgumentParser()
 parser.add_argument("--output", type=str, default="sp500_targets", help="Output file path")
 
-def sp500_targets():
-    sp500 = yf.Ticker("^GSPC")
-    sp500 = sp500.history(period='10y', interval='1d').select(pl.col.date.dt.date(), 'volume', price='close.amount')
-    sp500_cuts = sp500.with_columns(
-        pl.col.price.pct_change().cut([-1, -0.1, -0.05, -0.03, -0.01, 0.01, 0.03, 0.05, 0.1, 1])
+def classif_targets(
+        tickers=('^GSPC', '^VIX', 'DX-Y.NYB', 'WTI', '^TNX'),
+        cut_points=(-1, -0.1, -0.05, -0.03, -0.01, 0.01, 0.03, 0.05, 0.1, 1),
+        interval='1d'
+    ):
+    _l = list()
+    for ticker in tickers:
+        tick = yf.Ticker(ticker)
+        hist = tick.history(period='10y', interval=interval).select(
+            pl.col.date.dt.date(),
+            pl.col('close.amount').pct_change().cut(list(cut_points)).alias(ticker)
+        )
+        _l.append(hist)
+    targets = pl.concat(_l, how='align_full').drop_nulls()
+    print(
+        "Value counts for each target column:\n",
+        targets.select(cs.categorical().value_counts().implode()).to_dicts()
     )
-    targets = sp500_cuts.to_dummies('price') # TODO remove dummy encoding, pytorch can handle categorical labels directly with CrossEntropyLoss and no need for one-hot encoding. Just use the cut labels as categorical targets.
     return targets
 
 def news_headlines():

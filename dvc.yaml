@@ -1,7 +1,7 @@
 stages:
   extract:
     foreach:
-      - sp500_targets
+      - classif_targets
       - news_headlines
     do:
       cmd:
@@ -11,10 +11,12 @@ stages:
         - data/${item}.parquet
 
   train:
-    cmd: python -m src.finetune_headline_encoder --headlines data/news_headlines.parquet --targets data/sp500_targets.parquet --output models
+    cmd:
+      - mkdir -p models
+      - python -m src.finetune_headline_encoder --headlines data/news_headlines.parquet --targets data/classif_targets.parquet --output models/headline_classifier.pt
     deps:
       - data/news_headlines.parquet
-      - data/sp500_targets.parquet
+      - data/classif_targets.parquet
       - src/finetune_headline_encoder.py
     params:
       - params.yaml:
