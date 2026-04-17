@@ -21,10 +21,12 @@ def classif_targets(
         )
         _l.append(hist)
     targets = pl.concat(_l, how='align_full').drop_nulls()
-    print(
-        "Value counts for each target column:\n",
-        targets.select(cs.categorical().value_counts().implode()).to_dicts()
-    )
+    with pl.Config(tbl_cols=10, tbl_formatting='MARKDOWN', tbl_rows=300):
+        print(
+            "Value counts for each target column:\n",
+            targets.unpivot(on=cs.categorical())\
+                .group_by(target='variable', cat='value', maintain_order=True).agg(pl.len())
+        )
     return targets
 
 def news_headlines():
