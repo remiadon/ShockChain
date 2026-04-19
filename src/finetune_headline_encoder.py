@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 from pathlib import Path
 
 import dvc.api
@@ -40,15 +39,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--headlines", default="data/news_headlines.parquet")
 parser.add_argument("--targets",   default="data/sp500_targets.parquet")
 parser.add_argument("--output",    default="models")
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _key(name: str) -> str:
-    """Sanitize an instrument name for use as an nn.ModuleDict key."""
-    return re.sub(r"\W", "_", name)
 
 
 # ---------------------------------------------------------------------------
@@ -91,8 +81,9 @@ class BatchTokenizer:
 
 class HeadlineClassifier(nn.Module):
     """
-    Mean-pooled transformer encoder + one scalar regression head per instrument.
+    Mean-pooled transformer encoder + single regression head over all instruments.
 
+    One Linear(hidden, N) is equivalent to N×Linear(hidden, 1) but cleaner.
     instruments is stored on the model so a loaded checkpoint is self-describing.
     The mean-pooled encoder output is the reusable sentence embedding.
     """
@@ -102,13 +93,10 @@ class HeadlineClassifier(nn.Module):
         self.instruments = instruments
         self.encoder     = AutoModel.from_pretrained(base_model_name)
         hidden           = self.encoder.config.hidden_size
-        self.heads       = nn.ModuleDict({
-            _key(name): nn.Sequential(
-                nn.Dropout(0.1),
-                nn.Linear(hidden, 1),
-            )
-            for name in instruments
-        })
+        self.head        = nn.Sequential(
+            nn.Dropout(0.1),
+            nn.Linear(hidden, len(instruments)),
+        )
 
     @staticmethod
     def _mean_pool(
@@ -125,9 +113,9 @@ class HeadlineClassifier(nn.Module):
         **kwargs,
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
         out = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        emb = self._mean_pool(out.last_hidden_state, attention_mask)  # (B, H)
-        logits = {name: head(emb) for name, head in self.heads.items()}
-        return logits, emb
+        emb  = self._mean_pool(out.last_hidden_state, attention_mask)  # (B, H)
+        preds = self.head(emb)                                          # (B, N)
+        return preds, emb
 
 
 # ---------------------------------------------------------------------------
@@ -237,16 +225,13 @@ def train(
             batch        = {k: v.to(device) for k, v in batch.items()}
             batch_labels = batch_labels.to(device)        # (B, num_instruments)
             with torch.autocast(device_type=device.type, dtype=amp_dtype):
-                preds_dict, _ = model(**batch)
-                loss = sum(
-                    criterion(preds_dict[_key(inst)].squeeze(-1), batch_labels[:, i])
-                    for i, inst in enumerate(instruments)
-                ) / len(instruments) / grad_accum
+                preds, _ = model(**batch)                   # (B, N)
+                loss = criterion(preds, batch_labels) / grad_accum
             loss.backward()
             if step % grad_accum == 0 or step == len(train_dl):
                 optimizer.step()
                 optimizer.zero_grad()
-            running_loss += loss.item() * grad_accum * len(instruments)
+            running_loss += loss.item() * grad_accum
             train_iter.set_postfix(loss=f"{running_loss / step:.6f}")
 
         # ---- validate ----
@@ -263,10 +248,10 @@ def train(
             for batch, batch_labels in val_iter:
                 batch = {k: v.to(device) for k, v in batch.items()}
                 with torch.autocast(device_type=device.type, dtype=amp_dtype):
-                    preds_dict, _ = model(**batch)
+                    preds, _ = model(**batch)               # (B, N)
+                preds = preds.float().cpu()
                 for i, inst in enumerate(instruments):
-                    preds = preds_dict[_key(inst)].squeeze(-1).float().cpu()
-                    abs_err[inst] += (preds - batch_labels[:, i]).abs().sum().item()
+                    abs_err[inst] += (preds[:, i] - batch_labels[:, i]).abs().sum().item()
                 total += len(batch_labels)
 
         mae_str = "  ".join(
