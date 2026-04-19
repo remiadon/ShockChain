@@ -1,7 +1,7 @@
 stages:
   extract:
     foreach:
-      - classif_targets
+      - regression_targets
       - news_headlines
     do:
       cmd:
@@ -13,21 +13,21 @@ stages:
   train:
     cmd:
       - mkdir -p models
-      - python -m src.finetune_headline_encoder --headlines data/news_headlines.parquet --targets data/classif_targets.parquet --output models/headline_classifier.pt
+      - python -m src.finetune_headline_encoder --headlines data/news_headlines.parquet --targets data/regression_targets.parquet --output models/headline_regression.pt
     deps:
       - data/news_headlines.parquet
-      - data/classif_targets.parquet
+      - data/regression_targets.parquet
       - src/finetune_headline_encoder.py
     params:
       - params.yaml:
           - train
     outs:
-      - models/headline_classifier.pt
+      - models/headline_regression.pt
 
   populate_lancedb:
-    cmd: python -m src.populate_lancedb --headlines data/news_headlines.parquet --checkpoint models/headline_classifier.pt
+    cmd: python -m src.populate_lancedb --headlines data/news_headlines.parquet --checkpoint models/headline_regression.pt
     deps:
-      - models/headline_classifier.pt
+      - models/headline_regression.pt
       - data/news_headlines.parquet
       - src/populate_lancedb.py
     outs:

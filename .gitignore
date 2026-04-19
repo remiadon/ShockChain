@@ -3,3 +3,4 @@ uv.lock
 /lance
 CLAUDE.md
 src/__pycache__/
+models/

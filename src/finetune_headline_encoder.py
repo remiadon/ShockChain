@@ -1,15 +1,14 @@
 """
-Fine-tune a sentence transformer on news headlines → multi-instrument market bins.
+Fine-tune a sentence transformer on news headlines → multi-instrument return prediction.
 
 Design notes
 ------------
-* Many-to-one labelling: every headline on day T inherits that day's market bins
+* Many-to-one labelling: every headline on day T inherits that day's pct_change
   for all instruments (^GSPC, ^VIX, DX-Y.NYB, WTI, ^TNX).
   This is the standard weak-supervision approach for NLP-based market prediction.
 
-* Multi-task target: one classification head per instrument. Targets are Polars
-  categoricals; .to_physical() gives the integer class index directly — no
-  one-hot encoding needed.
+* Multi-task regression: one scalar output head per instrument, trained with MSELoss.
+  Validation reports MAE per instrument.
 
 * Embeddings: the encoder (mean-pooled transformer) is saved alongside the heads.
   populate_lancedb.py reloads the full model and uses only the encoder output
@@ -83,7 +82,7 @@ class BatchTokenizer:
             max_length=self.max_length,
             return_tensors="pt",
         )
-        return encodings, torch.tensor(np.stack(labels), dtype=torch.long)
+        return encodings, torch.tensor(np.stack(labels), dtype=torch.float)
 
 
 # ---------------------------------------------------------------------------
@@ -92,25 +91,23 @@ class BatchTokenizer:
 
 class HeadlineClassifier(nn.Module):
     """
-    Mean-pooled transformer encoder + one classification head per instrument.
+    Mean-pooled transformer encoder + one scalar regression head per instrument.
 
-    heads_meta maps instrument name → list of category label strings (in
-    physical/ordinal order matching the integer indices from .to_physical()).
-    It is stored on the model so a loaded checkpoint is self-describing.
+    instruments is stored on the model so a loaded checkpoint is self-describing.
     The mean-pooled encoder output is the reusable sentence embedding.
     """
 
-    def __init__(self, base_model_name: str, heads_meta: dict[str, list[str]]):
+    def __init__(self, base_model_name: str, instruments: list[str]):
         super().__init__()
-        self.heads_meta = heads_meta
-        self.encoder    = AutoModel.from_pretrained(base_model_name)
-        hidden          = self.encoder.config.hidden_size
-        self.heads      = nn.ModuleDict({
+        self.instruments = instruments
+        self.encoder     = AutoModel.from_pretrained(base_model_name)
+        hidden           = self.encoder.config.hidden_size
+        self.heads       = nn.ModuleDict({
             _key(name): nn.Sequential(
                 nn.Dropout(0.1),
-                nn.Linear(hidden, len(labels)),
+                nn.Linear(hidden, 1),
             )
-            for name, labels in heads_meta.items()
+            for name in instruments
         })
 
     @staticmethod
@@ -141,30 +138,15 @@ def build_pairs(
     headlines: pl.DataFrame,
     targets: pl.DataFrame,
     cfg: dict,
-) -> tuple[pl.DataFrame, dict[str, list[str]]]:
+) -> tuple[pl.DataFrame, list[str]]:
     """
     Join headlines with market targets on date.
 
-    Returns (pairs, heads_meta) where:
-    - pairs has columns: title (str) + one int64 column per instrument
-    - heads_meta maps instrument name → list of category label strings in
-      physical (ordinal) order, matching the integer indices in pairs
+    Returns (pairs, instruments) where:
+    - pairs has columns: title (str) + one float column per instrument (pct_change)
+    - instruments is the ordered list of target column names
     """
     instruments = [c for c in targets.columns if c != "date"]
-
-    # Collect category labels BEFORE converting to integer indices.
-    # cat.get_categories() returns labels in physical (ordinal) order,
-    # so index i corresponds to heads_meta[inst][i].
-    heads_meta: dict[str, list[str]] = {
-        inst: targets[inst].cat.get_categories().to_list()
-        for inst in instruments
-    }
-
-    # Replace categorical columns with their integer physical codes.
-    targets = targets.with_columns([
-        pl.col(inst).to_physical().cast(pl.Int64)
-        for inst in instruments
-    ])
 
     lag = cfg["target_lag_days"]
     if lag > 0:
@@ -176,19 +158,19 @@ def build_pairs(
         headlines
         .join(targets.select(["date"] + instruments), on="date", how="inner")
         .drop_nulls("title")
+        .drop_nulls(instruments)
     )
 
     if cfg["max_samples"] is not None:
         pairs = pairs.sample(int(cfg["max_samples"])).sort("date")
-
-    pairs = pairs.select(["title"] + instruments)  # reorder columns
+    pairs = pairs.select(["title"] + instruments)
 
     print(
         f"Joined {pairs.height:,} pairs | "
         f"{len(instruments)} instruments | "
         f"lag={lag}d"
     )
-    return pairs, heads_meta
+    return pairs, instruments
 
 
 # ---------------------------------------------------------------------------
@@ -200,8 +182,7 @@ def train(
     targets: pl.DataFrame,
     cfg: dict,
 ) -> HeadlineClassifier:
-    pairs, heads_meta = build_pairs(headlines, targets, cfg)
-    instruments = list(heads_meta.keys())
+    pairs, instruments = build_pairs(headlines, targets, cfg)
 
     # Chronological train/val split
     split    = int((1 - cfg["val_ratio"]) * pairs.height)
@@ -236,9 +217,9 @@ def train(
     grad_accum = int(cfg.get("grad_accum", 1))
     print(f"Device: {device}  |  amp_dtype: {amp_dtype}  |  grad_accum: {grad_accum}")
 
-    model     = HeadlineClassifier(cfg["base_model"], heads_meta).to(device)
+    model     = HeadlineClassifier(cfg["base_model"], instruments).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg["lr"])
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.MSELoss()
 
     for epoch in range(cfg["epochs"]):
         # ---- train ----
@@ -256,9 +237,9 @@ def train(
             batch        = {k: v.to(device) for k, v in batch.items()}
             batch_labels = batch_labels.to(device)        # (B, num_instruments)
             with torch.autocast(device_type=device.type, dtype=amp_dtype):
-                logits_dict, _ = model(**batch)
+                preds_dict, _ = model(**batch)
                 loss = sum(
-                    criterion(logits_dict[_key(inst)], batch_labels[:, i])
+                    criterion(preds_dict[_key(inst)].squeeze(-1), batch_labels[:, i])
                     for i, inst in enumerate(instruments)
                 ) / len(instruments) / grad_accum
             loss.backward()
@@ -266,11 +247,11 @@ def train(
                 optimizer.step()
                 optimizer.zero_grad()
             running_loss += loss.item() * grad_accum * len(instruments)
-            train_iter.set_postfix(loss=f"{running_loss / step:.4f}")
+            train_iter.set_postfix(loss=f"{running_loss / step:.6f}")
 
         # ---- validate ----
         model.eval()
-        correct = {inst: 0 for inst in instruments}
+        abs_err = {inst: 0.0 for inst in instruments}
         total   = 0
         val_iter = tqdm(
             val_dl,
@@ -282,20 +263,20 @@ def train(
             for batch, batch_labels in val_iter:
                 batch = {k: v.to(device) for k, v in batch.items()}
                 with torch.autocast(device_type=device.type, dtype=amp_dtype):
-                    logits_dict, _ = model(**batch)
+                    preds_dict, _ = model(**batch)
                 for i, inst in enumerate(instruments):
-                    preds = logits_dict[_key(inst)].argmax(dim=-1).cpu()
-                    correct[inst] += (preds == batch_labels[:, i]).sum().item()
+                    preds = preds_dict[_key(inst)].squeeze(-1).float().cpu()
+                    abs_err[inst] += (preds - batch_labels[:, i]).abs().sum().item()
                 total += len(batch_labels)
 
-        acc_str = "  ".join(
-            f"{inst}: {correct[inst] / max(1, total):.3f}"
+        mae_str = "  ".join(
+            f"{inst}: {abs_err[inst] / max(1, total):.5f}"
             for inst in instruments
         )
         print(
             f"Epoch {epoch + 1}/{cfg['epochs']} | "
-            f"Loss: {running_loss / len(train_dl):.4f} | "
-            f"Val Acc — {acc_str}"
+            f"Loss: {running_loss / len(train_dl):.6f} | "
+            f"Val MAE — {mae_str}"
         )
 
         if device.type == "mps":

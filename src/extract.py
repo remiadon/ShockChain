@@ -7,7 +7,7 @@ from inspect import getmembers, isfunction
 parser = argparse.ArgumentParser()
 parser.add_argument("--output", type=str, default="sp500_targets", help="Output file path")
 
-def classif_targets(
+def regression_targets(
         tickers=('^GSPC', '^VIX', 'DX-Y.NYB', 'WTI', '^TNX'),
         cut_points=(-1, -0.1, -0.05, -0.03, -0.01, 0.01, 0.03, 0.05, 0.1, 1),
         interval='1d'
@@ -17,23 +17,14 @@ def classif_targets(
         tick = yf.Ticker(ticker)
         hist = tick.history(period='10y', interval=interval).select(
             pl.col.date.dt.date(),
-            pl.col('close.amount').alias(ticker)
+            pl.col('close.amount').pct_change().alias(ticker)
         )
         _l.append(hist)
-    df = pl.concat(_l, how='align_full').drop_nulls()
-    var = pl.col(tickers).pct_change()
-    zscore = (var - var.rolling_mean(60)) / var.rolling_std(60)
-    targets = df.select('date',
-        zscore.cut(
-            [-2, -1, 1, 2], 
-            labels=['strong negative', 'negative', 'neutral', 'positive', 'strong positive']
-        ).name.keep()
-    ).drop_nulls()
+    targets = pl.concat(_l, how='align_full').drop_nulls()
     with pl.Config(tbl_cols=10, tbl_formatting='MARKDOWN', tbl_rows=300):
         print(
             "Value counts for each target column:\n",
-            targets.unpivot(on=cs.categorical())\
-                .group_by(target='variable', cat='value', maintain_order=True).agg(pl.len())
+            targets.describe()
         )
     return targets
 
