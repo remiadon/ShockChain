@@ -1,6 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Environment / secrets
+.env
+
+# DVC artifacts
 data/
-uv.lock
-/lance
-CLAUDE.md
-src/__pycache__/
 models/
+/lance
+
+# Project outputs
+output/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+*log.json
+*egg-info
+CLAUDE.md

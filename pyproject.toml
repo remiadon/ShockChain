@@ -15,8 +15,12 @@ dependencies = [
     'dvc',
     'transformers',          # AutoTokenizer / AutoModel (HuggingFace)
     'tqdm',                  # progress bars in training loop
+    'anthropic',             # Claude API for headline generation
+    'python-dotenv',         # .env loading for API keys
 ]
 
+[tool.uv]
+extra-build-dependencies = { iisignature = ["numpy"] }
 
 [dependency-groups]
 dev = [
