@@ -12,7 +12,7 @@ models/
 /lance
 
 # Project outputs
-output/
+#output/
 
 # IDE
 .idea/
