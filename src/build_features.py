@@ -208,7 +208,10 @@ def standardize_trailing(df: pl.DataFrame, cols: list[str], window: int = 252, m
     for c in cols:
         m = pl.col(c).rolling_mean(window_size=window, min_samples=min_periods)
         s = pl.col(c).rolling_std(window_size=window, min_samples=min_periods)
-        exprs.append(((pl.col(c) - m) / s).alias(f"{c}_z"))
+        # When the trailing window has zero variance (e.g., fed_funds pinned
+        # at 0 for years) the z-score is undefined — emit 0 (no signal).
+        z = pl.when(s > 1e-12).then((pl.col(c) - m) / s).otherwise(0.0)
+        exprs.append(z.alias(f"{c}_z"))
     return df.with_columns(exprs)
 
 
@@ -240,9 +243,11 @@ def compute_targets(df: pl.DataFrame) -> pl.DataFrame:
     for ind in TARGETS:
         vol = pl.col(f"_vol_{ind}")
         for h in HORIZONS:
-            z_exprs.append(
-                (pl.col(f"{ind}_{h}d_raw") / vol).cast(pl.Float32).alias(f"{ind}_{h}d_z")
-            )
+            # Divide by sqrt(h) so each horizon has unit variance under a
+            # random-walk null. Then ŷ=0 has RMSE≈1 across all horizons.
+            denom = vol * float(np.sqrt(h))
+            z = pl.when(denom > 1e-12).then(pl.col(f"{ind}_{h}d_raw") / denom).otherwise(None)
+            z_exprs.append(z.cast(pl.Float32).alias(f"{ind}_{h}d_z"))
     df = df.with_columns(z_exprs)
 
     df = df.drop([f"_vol_{ind}" for ind in TARGETS])
@@ -285,7 +290,7 @@ def main():
     keep = ["date"] + z_cols + target_cols
     market_slim = market.select(keep)
 
-    events = pl.read_csv(EVENTS_CSV)
+    events = pl.read_csv(EVENTS_CSV).with_row_index("event_id")
     n_events = events.height
     aligned = align_events(events, market_slim)
     matched = aligned.filter(pl.col("market_date").is_not_null()).height
@@ -300,6 +305,7 @@ def main():
     print(f"Dropped {dropped} events with null features/targets after fills")
 
     final = aligned.select([
+        pl.col("event_id"),
         pl.col("headline"),
         pl.col("event_date").alias("date"),
         pl.col("market_date"),
